@@ -23,7 +23,12 @@ namespace Hdf5DotNetTools
 #endif
     public static partial class Hdf5
     {
+        public static bool ContainsUnicodeCharacter(string input)
+        {
+            const int MaxAnsiCode = 255;
 
+            return input.Any(c => c > MaxAnsiCode);
+        }
 
         public static IEnumerable<string> ReadStrings(hid_t groupId, string name)
         {
@@ -249,6 +254,7 @@ namespace Hdf5DotNetTools
 
                 hnd.Free();
                 H5S.close(spaceId);
+                H5T.close(typeId);
                 H5D.close(datasetId);
 
                 return attrStrings[0];
@@ -269,6 +275,7 @@ namespace Hdf5DotNetTools
             Marshal.Copy(iPtr, strDest, 0, size);
             Marshal.FreeHGlobal(iPtr);
 
+            H5T.close(typeId);
             H5D.close(datasetId);
 
             return Encoding.UTF8.GetString(strDest).TrimEnd((Char)0);

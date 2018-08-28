@@ -154,42 +154,87 @@ namespace Hdf5DotNetTools
                     groupId = datasetId;
             }
 
+            bool isUnicode = false;
+            bool isVariable = false;
+            int strLen = 0;
+            foreach (string str in strs)
+            {
+                if (ContainsUnicodeCharacter(str))
+                {
+                    isUnicode = true;
+                }
+
+                if (strLen > 0 && strLen != str.Length)
+                {
+                    isVariable = true;
+                }
+                else
+                {
+                    strLen = str.Length;
+                }
+            }
+
             // create UTF-8 encoded attributes
-            hid_t datatype = H5T.create(H5T.class_t.STRING, H5T.VARIABLE);
-            H5T.set_cset(datatype, H5T.cset_t.UTF8);
-            H5T.set_strpad(datatype, H5T.str_t.SPACEPAD);
+            hid_t datatype = H5T.create(H5T.class_t.STRING, (isVariable ? H5T.VARIABLE : new IntPtr(strLen)));
+            H5T.set_cset(datatype, (isUnicode ? H5T.cset_t.UTF8 : H5T.cset_t.ASCII));
+            H5T.set_strpad(datatype, H5T.str_t.NULLPAD);
 
             int strSz = strs.Count();
             hid_t spaceId = H5S.create_simple(1,
-                new ulong[] { (ulong)strSz }, null);
+                (isVariable ? new ulong[] { (ulong)strSz } : new ulong[] { (ulong)strSz, (ulong)strLen }), null);
 
             var attributeId = H5A.create(groupId, name, datatype, spaceId);
 
-            GCHandle[] hnds = new GCHandle[strSz];
-            IntPtr[] wdata = new IntPtr[strSz];
+            GCHandle hnd;
+            int result;
 
-            int cntr = 0;
-            foreach (string str in strs)
+            if (isVariable)
             {
-                hnds[cntr] = GCHandle.Alloc(
-                    Encoding.UTF8.GetBytes(str),
-                    GCHandleType.Pinned);
-                wdata[cntr] = hnds[cntr].AddrOfPinnedObject();
-                cntr++;
+                GCHandle[] hnds = new GCHandle[strSz];
+                IntPtr[] wdata = new IntPtr[strSz];
+
+                int cntr = 0;
+                foreach (string str in strs)
+                {
+                    hnds[cntr] = GCHandle.Alloc(
+                        (isUnicode ? Encoding.UTF8.GetBytes(str) : Encoding.ASCII.GetBytes(str)),
+                        GCHandleType.Pinned);
+                    wdata[cntr] = hnds[cntr].AddrOfPinnedObject();
+                    cntr++;
+                }
+
+                hnd = GCHandle.Alloc(wdata, GCHandleType.Pinned);
+
+                result = H5A.write(attributeId, datatype, hnd.AddrOfPinnedObject());
+                hnd.Free();
+                
+                for (int i = 0; i < strSz; ++i)
+                {
+                    hnds[i].Free();
+                }
             }
-
-            var hnd = GCHandle.Alloc(wdata, GCHandleType.Pinned);
-
-            var result = H5A.write(attributeId, datatype, hnd.AddrOfPinnedObject());
-            hnd.Free();
-
-            for (int i = 0; i < strSz; ++i)
+            else
             {
-                hnds[i].Free();
+                byte[] wdata = new byte[strSz * (strLen + 1)];
+                int cntr = 0;
+                foreach (string str in strs)
+                {
+                    for (int i = 0; i < strLen; ++i)
+                    {
+                        wdata[cntr] = Convert.ToByte(str[i]);
+                        cntr++;
+                    }
+                }
+
+                hnd = GCHandle.Alloc(wdata, GCHandleType.Pinned);
+
+                result = H5A.write(attributeId, datatype, hnd.AddrOfPinnedObject());
+                hnd.Free();
             }
 
             H5S.close(spaceId);
             H5T.close(datatype);
+            if (!string.IsNullOrWhiteSpace(datasetName))
             {
                 H5D.close(groupId);
             }
