@@ -153,10 +153,12 @@ namespace Hdf5DotNetTools
                 if (datasetId > 0)
                     groupId = datasetId;
             }
+            int strLen = 0;
+            int strSz = strs.Count();
 
             bool isUnicode = false;
-            bool isVariable = false;
-            int strLen = 0;
+            bool isVariable = (strSz == 1);
+
             foreach (string str in strs)
             {
                 if (ContainsUnicodeCharacter(str))
@@ -164,11 +166,7 @@ namespace Hdf5DotNetTools
                     isUnicode = true;
                 }
 
-                if (strLen > 0 && strLen != str.Length)
-                {
-                    isVariable = true;
-                }
-                else
+                if (str.Length > strLen)
                 {
                     strLen = str.Length;
                 }
@@ -177,11 +175,10 @@ namespace Hdf5DotNetTools
             // create UTF-8 encoded attributes
             hid_t datatype = H5T.create(H5T.class_t.STRING, (isVariable ? H5T.VARIABLE : new IntPtr(strLen)));
             H5T.set_cset(datatype, (isUnicode ? H5T.cset_t.UTF8 : H5T.cset_t.ASCII));
-            H5T.set_strpad(datatype, H5T.str_t.NULLPAD);
+            H5T.set_strpad(datatype, ((strSz == 1) ? H5T.str_t.NULLTERM : H5T.str_t.NULLPAD));
 
-            int strSz = strs.Count();
-            hid_t spaceId = H5S.create_simple(1,
-                (isVariable ? new ulong[] { (ulong)strSz } : new ulong[] { (ulong)strSz, (ulong)strLen }), null);
+            hid_t spaceId = ((strSz == 1) ? H5S.create(H5S.class_t.SCALAR)
+                : H5S.create_simple(1, (isVariable ? new ulong[] { (ulong)strSz } : new ulong[] { (ulong)strSz, (ulong)strLen }), null));
 
             var attributeId = H5A.create(groupId, name, datatype, spaceId);
 
@@ -207,7 +204,7 @@ namespace Hdf5DotNetTools
 
                 result = H5A.write(attributeId, datatype, hnd.AddrOfPinnedObject());
                 hnd.Free();
-                
+
                 for (int i = 0; i < strSz; ++i)
                 {
                     hnds[i].Free();
@@ -221,7 +218,15 @@ namespace Hdf5DotNetTools
                 {
                     for (int i = 0; i < strLen; ++i)
                     {
-                        wdata[cntr] = Convert.ToByte(str[i]);
+                        if (i < str.Length)
+                        {
+                            wdata[cntr] = Convert.ToByte(str[i]);
+                        }
+                        else
+                        {
+                            wdata[cntr] = Convert.ToByte(0); // NULLPAD
+                        }
+
                         cntr++;
                     }
                 }
