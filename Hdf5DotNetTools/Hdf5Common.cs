@@ -85,6 +85,7 @@ namespace Hdf5DotNetTools
         /// <returns></returns>
         public static hid_t OpenFile(string filename, bool readOnly = false, bool overwrite = false)
         {
+            H5E.set_auto(H5E.DEFAULT, null, IntPtr.Zero);
             hid_t fileId;
             uint access = (readOnly) ? H5F.ACC_RDONLY : H5F.ACC_RDWR;
             fileId = H5F.open(filename, access);
@@ -93,10 +94,9 @@ namespace Hdf5DotNetTools
 
         public static hid_t CreateFile(string filename)
         {
+            H5E.set_auto(H5E.DEFAULT, null, IntPtr.Zero);
             return H5F.create(filename, H5F.ACC_TRUNC);
         }
-
-
 
         public static hid_t CloseFile(hid_t fileId)
         {
