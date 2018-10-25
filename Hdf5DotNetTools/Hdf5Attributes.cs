@@ -1,6 +1,7 @@
 ﻿using HDF.PInvoke;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -71,41 +72,78 @@ namespace Hdf5DotNetTools
 
         public static IEnumerable<string> ReadStringAttributes(hid_t groupId, string name)
         {
+            hid_t attrId = 0;
+            hid_t spaceId = 0;
+            hid_t typeId = 0;
 
-            hid_t datatype = H5T.create(H5T.class_t.STRING, H5T.VARIABLE);
-            H5T.set_cset(datatype, H5T.cset_t.UTF8);
-            H5T.set_strpad(datatype, H5T.str_t.NULLTERM);
-
-            //name = ToHdf5Name(name);
-
-            var datasetId = H5A.open(groupId, name);
-            hid_t spaceId = H5A.get_space(datasetId);
-
-            long count = H5S.get_simple_extent_npoints(spaceId);
-            H5S.close(spaceId);
-
-            IntPtr[] rdata = new IntPtr[count];
-            GCHandle hnd = GCHandle.Alloc(rdata, GCHandleType.Pinned);
-            H5A.read(datasetId, datatype, hnd.AddrOfPinnedObject());
-
-            var strs = new List<string>();
-            for (int i = 0; i < rdata.Length; ++i)
+            try
             {
-                int len = 0;
-                while (Marshal.ReadByte(rdata[i], len) != 0) { ++len; }
-                byte[] buffer = new byte[len];
-                Marshal.Copy(rdata[i], buffer, 0, buffer.Length);
-                string s = Encoding.UTF8.GetString(buffer);
+                attrId = H5A.open(groupId, name);
+                if (attrId < 0)
+                {
+                    throw new ArgumentException($"Unknown Attribute: {name}", nameof(name));
+                }
 
-                strs.Add(s);
+                typeId = H5A.get_type(attrId);
+                spaceId = H5A.get_space(attrId);
+                long count = H5S.get_simple_extent_npoints(spaceId);
+                int size = H5T.get_size(typeId).ToInt32();
 
-                H5.free_memory(rdata[i]);
+                if (H5T.is_variable_str(typeId) > 0)
+                {
+                    IntPtr[] rdata = new IntPtr[count];
+                    GCHandle hnd = GCHandle.Alloc(rdata, GCHandleType.Pinned);
+                    H5A.read(attrId, typeId, hnd.AddrOfPinnedObject());
+                    hnd.Free();
+
+                    List<string> listStrings = new List<string>();
+                    for (int i = 0; i < rdata.Length; ++i)
+                    {
+                        int len = 0;
+                        while (Marshal.ReadByte(rdata[i], len) != 0) { ++len; }
+                        byte[] buffer = new byte[len];
+                        Marshal.Copy(rdata[i], buffer, 0, buffer.Length);
+                        string s = Encoding.UTF8.GetString(buffer);
+
+                        listStrings.Add(s);
+
+                        H5.free_memory(rdata[i]);
+                    }
+
+                    return listStrings;
+                }
+
+                // Must be a non-variable length string.
+                int rank = H5S.get_simple_extent_ndims(spaceId);
+                ulong[] dims = new ulong[rank];
+                ulong[] maxDims = new ulong[rank];
+                H5S.get_simple_extent_dims(spaceId, dims, maxDims);
+                byte[] dataBytes = new byte[dims[0] * (ulong)size];
+
+                GCHandle pinnedArray = GCHandle.Alloc(dataBytes, GCHandleType.Pinned);
+                int result = H5A.read(attrId, typeId, pinnedArray.AddrOfPinnedObject());
+                pinnedArray.Free();
+
+                List<string> attrList = new List<string>();
+                for (int i = 0; i < (int)(dims[0]); i++)
+                {
+                    byte[] slice = dataBytes.Skip<byte>(i * size).Take<byte>(size).ToArray<byte>();
+                    var content = System.Text.Encoding.ASCII.GetString(slice).TrimEnd((Char)0);
+                    attrList.Add(content);
+                }
+
+                return attrList;
             }
-
-            hnd.Free();
-            H5T.close(datatype);
-            H5A.close(datasetId);
-            return strs;
+            catch (Exception ex)
+            {
+                throw ex;
+            }
+            finally
+            {
+                if (attrId > 0) H5A.close(attrId);
+                if (spaceId > 0) H5S.close(spaceId);
+                if (typeId > 0) H5T.close(typeId);
+            }
         }
 
         public static Array ReadPrimitiveAttributes<T>(hid_t groupId, string name) //where T : struct
